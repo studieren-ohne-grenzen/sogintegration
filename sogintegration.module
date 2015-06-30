@@ -3,66 +3,129 @@
 
 /**
 * @file
-* Custom hooks for SOG functionality
+* Custom hooks for SOG member signup/creation
 */
 
 //error_reporting(E_ALL);
+$mdpassword = "CHANGE THIS TO MAJORDOMO MAILINGLIST PASSWORD";
 
-/** Hook into CiviCRM Contribution page (Online Mitgliederformular) **/
-function sogintegration_civicrm_postProcess( $formName, &$form ) {
-	if ($formName == "CRM_Contribute_Form_Contribution_Confirm" && $form->_values['title'] == "Aktive Mitgliedschaft") {
-	    $firstName = t($form->_submitValues['first_name']);
-	    $lastName = t($form->_submitValues['last_name']);
-	    $email = t($form->_params['email-5']);
-	    $lokalgruppe = t($form->_params['custom_11']);
-		sogintegration_addUser($firstName, $lastName, $email, $lokalgruppe);
-	}
+/**
+ * Hook into CiviCRM Contribution page (Online Mitgliederformular)
+ */
+function sogintegration_civicrm_postProcess($formName, &$form ) {
+    if ($formName == "CRM_Contribute_Form_Contribution_Confirm" && $form->_values['title'] == "Aktive Mitgliedschaft") {
+        
+        // get parameters from form
+        $firstName = t($form->_submitValues['first_name']);
+        $lastName = t($form->_submitValues['last_name']);
+        $email = t($form->_params['email-5']);
+        $lokalgruppe = t($form->_params['custom_11']);
+        
+        // generate accounts, etc.
+        sogintegration_addOpenAtriumUser($firstName, $lastName, $email, $lokalgruppe);
+        sogintegration_addToLgMailinglist($lokalgruppe, $email);
+        //sogintegration_addToNewsletter($username, $email);
+        
+        sogintegration_notifyLokalkoordinator($firstName, $lastName, $email, $lokalgruppe);
+    }
 }
 
-/** main function to add new user **/
-function sogintegration_addUser($firstName, $lastName, $email, $lokalgruppe) {
-    $rawUsername = trim($firstName) . " " . trim($lastName);
-	$username = sogintegration_selectUsername($rawUsername);
-	//$username = sogintegration_civicrm_addUser_transformUsername($username); // replace special characters
 
-	sogintegration_addUser_addToOpenAtrium($firstName, $username, $email);
-    $uid = sogintegration_getUID($username);
-    //sogintegration_addUser_addToOpenAtrium_RealName($uid, $username);
-    sogintegration_addUser_addToGroups($uid, $lokalgruppe);
+/**
+ * Insert the user into the openatrium user table 
+ */
+function sogintegration_addOpenAtriumUser($firstName, $lastName, $email, $lokalgruppe) {
+    // generate new user credentials
+    $username = sogintegration_selectUsername($firstName, $lastName);
+    $password = sogintegration_generatePassword(8);
+
+    $query = "INSERT INTO `users` (`uid`, `name`, `pass`, `mail`, `mode`, `sort`, `threshold`, `theme`, `signature`, `signature_format`, `created`, `access`, `login`, `status`, `timezone`, `language`, `picture`, `init`, `data`) VALUES (NULL, '%s', '%s', '%s', '0', '0', '0', '', '', '0', %d, '0', '0', '0', '3600', '', '', '', NULL)";
+    // status = 0 -> account needs to be enabled manually
+    
+    $result = db_query($query, $username, md5($password), $email, time());
+    
+    sogintegration_sendWelcomeMail($firstName, $username, $email, $password);
     drupal_set_message("Account '".$username."' erstellt (ID=$uid)");
-	
-	sogintegration_civicrm_addUser_addToLokalengruppenMailinglist($lokalgruppe, $email);
-	//sogintegration_civicrm_addUser_addToGeneralMailinglist($username, $email);
-	
-	sogintegration_notifyLokalkoordinator($firstName, $lastName, $email, $lokalgruppe);
+    
+    $uid = sogintegration_getUID($username);
+    sogintegration_addToOpenAtriumGroups($uid, $lokalgruppe);
 }
 
 
-/** Test whether the username is already taken. If so append an increasing number until the user name
-    does not already exist */
-function sogintegration_selectUsername($username) {
-	$foundUsername = false;
-	$i = 0;
-	while (!$foundUsername) {
-		if ($i == 0) {
-			$param = $username;
-		} else {
-			$param = $username.$i;
-		}
-		$result = db_result(db_query("SELECT uid FROM `users` WHERE name = '%s'", $param));
-
-		if ($result == FALSE) {
-			$foundUsername = true;
-			if ($i != 0)
-				$username = $username . $i;
-		} else {
-			++$i;
-		}
-	}
-
-	return $username;
+/**
+ * Get the ID of the user we just inserted
+ */
+function sogintegration_getUID($username) {
+    $result = db_fetch_object(db_query("SELECT uid FROM `users` WHERE name = '%s'", $username));
+    return $result->uid;
 }
 
+
+/**
+ * Add the user to the relevant OA groups.
+ */
+function sogintegration_addToOpenAtriumGroups($uid, $lokalgruppe) {
+    /** Insert the User into the organic group named 'Allgemein' */
+    $query = "SELECT nid FROM `openatrium_node` WHERE title = 'Allgemein' AND type='group'";
+    $result = db_fetch_object(db_query($query));
+    $nid = $result->nid;
+
+    $query_joinOG = "INSERT INTO `openatrium_og_uid` (`nid`, `og_role`, `is_active`, `is_admin`, `uid`, `created`, `changed`) VALUES (%d, 0, 1, 0, %d, %d, %d)";
+    
+    $result = db_query($query_joinOG, $nid, $uid, time(), time());
+
+    /** Insert the User into the specific Lokalgruppe */
+    $query = "SELECT nid FROM `openatrium_node` WHERE title = 'LG %s' AND type='group'";
+    $result = db_query($query, $lokalgruppe);
+    /** Just insert if we found a group with this name */
+    if (db_result($result)) {
+        $res = db_fetch_object($result);
+        $result = db_query($query_joinOG, $res->nid, $uid, time(), time());
+    }
+}
+
+
+/**
+ * Generate a unique username.
+ * Tests whether the username is already taken. If so, appends 
+ * an increasing number until the username does not already exist
+ */
+function sogintegration_selectUsername($firstName, $lastName) {
+    $username = trim($firstName) . " " . trim($lastName);
+
+    $foundUsername = false;
+    $i = 0;
+    while (!$foundUsername) {
+        if ($i == 0) {
+            $param = $username;
+        } else {
+            $param = $username.$i;
+        }
+        $result = db_result(db_query("SELECT uid FROM `users` WHERE name = '%s'", $param));
+
+        if ($result == FALSE) {
+            $foundUsername = true;
+            if ($i != 0)
+                $username = $username . $i;
+        } else {
+            ++$i;
+        }
+    }
+
+    // normalize special chars in username
+    /*$usernameEasy = str_replace("ä", "ae", $username);
+    $usernameEasy = str_replace("ö", "oe", $usernameEasy);
+    $usernameEasy = str_replace("ü", "ue", $usernameEasy);
+    $usernameEasy = str_replace("ß", "ss", $usernameEasy);
+    $usernameEasy = str_replace(" ", ".", $usernameEasy);*/
+    
+    return $username;
+}
+
+
+/**
+ * Generate a new random password
+ */
 function sogintegration_generatePassword($length = 8) {
     $password = "";
 
@@ -74,7 +137,7 @@ function sogintegration_generatePassword($length = 8) {
     if ($length > $maxlength) {
       $length = $maxlength;
     }
-	
+    
     $i = 0; 
     while ($i < $length) { 
       // pick a random character from the possible ones
@@ -92,11 +155,13 @@ function sogintegration_generatePassword($length = 8) {
 }
 
 
-
-/** Send a mail to the user */
-/** This is send only for OpenAtrium Details, a welcome mail is send through CiviCRM */
-function sogintegration_addUser_sendWelcomeMail($firstName, $username, $email, $password) {	
-	$text = '<html><head><title></title></head><body>
+/**
+ * Send a mail to the user.
+ * This is send only for OpenAtrium account details, a welcome mail is send through CiviCRM!
+ */
+function sogintegration_sendWelcomeMail($firstName, $username, $email, $password) {    
+    $text = '
+<html><head><title></title></head><body>
 Hallo ' . $firstName . ',<br />
 Wir freuen uns sehr, dich als neues Mitglied bei Studieren ohne Grenzen begrüßen zu dürfen.<br />
 <br />
@@ -116,98 +181,30 @@ it@studieren-ohne-grenzen.org
 </body>
 </html>
 ';
-	$text = wordwrap($text, 70);
-	# $extra= 'From: it@studieren-ohne-grenzen.org' . "\r\n" . 'MIME-Version: 1.0' . "\r\n" . 'Content-Type: text/plain; charset=ISO-8859-1' . "\r\n" . 'Content-Transfer-Encoding: quoted-printable';
-	$extra = "From: it@studieren-ohne-grenzen.org\nContent-Type: text/html; charset=UTF-8\nContent-Transfer-Encoding: 8bit";
-	@mail($email, "Zugangsdaten OpenAtrium - Studieren Ohne Grenzen", $text, $extra);
+    $text = wordwrap($text, 70);
+    # $extra= 'From: it@studieren-ohne-grenzen.org' . "\r\n" . 'MIME-Version: 1.0' . "\r\n" . 'Content-Type: text/plain; charset=ISO-8859-1' . "\r\n" . 'Content-Transfer-Encoding: quoted-printable';
+    $extra = "From: it@studieren-ohne-grenzen.org\nContent-Type: text/html; charset=UTF-8\nContent-Transfer-Encoding: 8bit";
+    @mail($email, "Zugangsdaten OpenAtrium - Studieren Ohne Grenzen", $text, $extra);
 }
 
 
+/**
+ * Inserts the new user into the mailing list of the specific Lokalgruppe
+ */
+function sogintegration_addToLgMailinglist($lokalgruppe, $email) {
+    $mdrecipient = "majordomo@s-o-g.org";
+    $mdfrom = "atrium@studieren-ohne-grenzen.org"; // erhaelt eventuelle fehlermeldungen von majordomo
 
-/** Insert the user into the openatrium user table */
-function sogintegration_addUser_addToOpenAtrium($firstName, $username, $email) {
-	$query = "INSERT INTO `users` (`uid`, `name`, `pass`, `mail`, `mode`, `sort`, `threshold`, `theme`, `signature`, `signature_format`, `created`, `access`, `login`, `status`, `timezone`, `language`, `picture`, `init`, `data`) VALUES (NULL, '%s', '%s', '%s', '0', '0', '0', '', '', '0', %d, '0', '0', '0', '3600', '', '', '', NULL)";
-	// status = 0 -> account needs to be enabled manually
-
-	$password = sogintegration_generatePassword(8);
-
-	$result = db_query($query, $username, md5($password), $email, time());
-
-	sogintegration_addUser_sendWelcomeMail($firstName, $username, $email, $password);
-}
-
-/** Insert the user also into the openatrium realname module table */
-function sogintegration_addUser_addToOpenAtrium_RealName($uid, $username) {
-	$result = db_query("INSERT INTO `openatrium_realname` (`uid`, `realname`) VALUES (%d, '%s')", $uid, $username);
+    $listmail = "approve " . $mdpassword . " subscribe " . strtolower($lokalgruppe) . "-s-o-g-org " . $email;
+    @mail($mdrecipient, "Automated Majordomo Subscription", $listmail, "From: " . $mdfrom);
+    
+    drupal_set_message("$email wurde auf Lokalgruppen-Verteiler gesetzt.");
 }
 
 
-/** Get the ID of the user we just inserted */
-function sogintegration_getUID($username) {
-	$result = db_fetch_object(db_query("SELECT uid FROM `users` WHERE name = '%s'", $username));
-	return $result->uid;
-}
-
-function sogintegration_addUser_addToGroups($uid, $lokalgruppe) {
-	/** Insert the User into the organic group named 'Allgemein' */
-	$query = "SELECT nid FROM `openatrium_node` WHERE title = 'Allgemein' AND type='group'";
-	$result = db_fetch_object(db_query($query));
-	$nid = $result->nid;
-
-	$query_joinOG = "INSERT INTO `openatrium_og_uid` (`nid`, `og_role`, `is_active`, `is_admin`, `uid`, `created`, `changed`) VALUES (%d, 0, 1, 0, %d, %d, %d)";
-	
-	$result = db_query($query_joinOG, $nid, $uid, time(), time());
-
-	/** Insert the User into the specific Lokalgruppe */
-	$query = "SELECT nid FROM `openatrium_node` WHERE title = 'LG %s' AND type='group'";
-    $result = db_query($query, $lokalgruppe);
-	/** Just insert if we found a group with this name */
-	if (db_result($result)) {
-	    $res = db_fetch_object($result);
-		$result = db_query($query_joinOG, $res->nid, $uid, time(), time());
-	}
-}
-
-/** Inserts the new user into the mailing list of the specific
-    Lokalgruppe */
-function sogintegration_civicrm_addUser_addToLokalengruppenMailinglist($lokalgruppe, $email) {
-	$mdpassword = "soglist";
-	$mdrecipient = "majordomo@s-o-g.org";
-	$mdfrom = "atrium@studieren-ohne-grenzen.org"; // erhaelt eventuelle fehlermeldungen von majordomo
-
-	$listmail = "approve " . $mdpassword . " subscribe " . strtolower($lokalgruppe) . "-s-o-g-org " . $email;
-	@mail($mdrecipient, "Automated Majordomo Subscription", $listmail, "From: " . $mdfrom);
-	
-	drupal_set_message("Emailadresse wurde auf Lokalgruppen-Verteiler gesetzt.");
-}
-
-/** Inserts the new user into the general mailing lists */
-function sogintegration_civicrm_addUser_addToGeneralMailinglist($username, $email) {
-	// Id des Newsletters in PHPList
-	$newsletterid = 2;
-	// Id der Liste für Aktions-Email
-	$aktionid = 5;
-
-	//zu Newsletter-phplist hinzufuegen
-	//$userId = phplistSubscribe($newsletterid,$mail);
-
-	//zu Aktions-phplist hinzufuegen
-	//$userId = phplistSubscribe($aktionid,$mail);
-}
-
-function sogintegration_civicrm_addUser_transformUsername($username) {
-	$usernameEasy = str_replace("ä", "ae", $username);
-	$usernameEasy = str_replace("ö", "oe", $usernameEasy);
-	$usernameEasy = str_replace("ü", "ue", $usernameEasy);
-	$usernameEasy = str_replace("ß", "ss", $usernameEasy);
-	$usernameEasy = str_replace(" ", ".", $usernameEasy);
-
-	return $usernameEasy;
-}
-
-
-
-/* Send email to Lokalkoordinator of the Lokalgruppe to inform about new member */
+/**
+ * Send email to Lokalkoordinator of the Lokalgruppe to inform about new member
+ */
 function sogintegration_notifyLokalkoordinator($vorname, $name, $email, $standort) {
         $text = "Soeben hat sich ein neues Mitglied fuer Deine Lokalgruppe angemeldet.<br>
                 Das neue Mitglied ist schon auf dem Lokalgruppen-Verteiler eingetragen und hat einen OpenAtrium-Account erhalten.<br><br>

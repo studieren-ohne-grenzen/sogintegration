@@ -1,4 +1,5 @@
 name = SOG Integration
 description = Integration with Open Atrium for Studieren Ohne Grenzen. Adds user accounts and other functionalities and notifications for new users.
 package = sog
-core = 6.x
+core = 7.x
+version = 2.0

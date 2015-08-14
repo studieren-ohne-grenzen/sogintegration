@@ -6,7 +6,7 @@
 * Custom hooks for SOG member signup/creation
 */
 
-define("DASHBOARD_DIR", "/var/www/dashboard");
+define("DASHBOARD_DIR", "/var/www/studieren-ohne-grenzen.org/dashboard");
 
 /**
  * Hook into CiviCRM Contribution page (Online Mitgliederformular)

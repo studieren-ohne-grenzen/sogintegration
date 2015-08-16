@@ -26,7 +26,7 @@ function sogintegration_civicrm_postProcess($formName, &$form ) {
 
         $lokalgruppe = "lg_" . strtolower($lokalgruppe);
 
-        $api = new SOG\Api\SogDashboardApi($config);
+        $api = new SOG\Api\SogDashboardApi($dashboard_config);
         $username = $api->createUser($firstName, $lastName, $email, $lokalgruppe);
         
         drupal_set_message("Account '".$username."' erstellt");

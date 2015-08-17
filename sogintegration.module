@@ -6,15 +6,29 @@
 * Custom hooks for SOG member signup/creation
 */
 
+require_once '/var/www/studieren-ohne-grenzen.org/civicrm/sites/all/modules/civicrm/api/class.api.php' ;
 define("DASHBOARD_DIR", "/var/www/studieren-ohne-grenzen.org/dashboard");
+
 
 /**
  * Hook into CiviCRM Contribution page (Online Mitgliederformular)
  */
 function sogintegration_civicrm_postProcess($formName, &$form ) {
-    if ($formName == "CRM_Contribute_Form_Contribution_Confirm" 
-            && $form->_values['title'] == "Aktive Mitgliedschaft") {
-        
+    if ($formName == "CRM_Contribute_Form_Contribution_Confirm") { 
+        if($form->_values['title'] == "Aktive Mitgliedschaft") {
+            sogintegration_createSogUser($form);
+        }
+        if ($form->_params['contributionPageID'] == "1" || $form->_params['contributionPageID'] == "2") {
+            sogintegration_saveDirectDebit($form);
+        }
+    }
+}
+
+
+/**
+ * Create a new SOG user account through the SOG Dashboard API
+ */
+function sogintegration_createSogUser(&$form) {
         require_once DASHBOARD_DIR . '/vendor/autoload.php';
         require_once(DASHBOARD_DIR . '/app/config.php');
 
@@ -30,5 +44,69 @@ function sogintegration_civicrm_postProcess($formName, &$form ) {
         $username = $api->createUser($firstName, $lastName, $email, $lokalgruppe);
         
         drupal_set_message("Account '".$username."' erstellt");
-    }
 }
+
+
+/** 
+ * Add the direct debit (Lastschrifteinzug) data like amount and period to the CiviCRM membership
+ * because this is membership specific and not general for the contact overall. 
+ */
+function sogintegration_saveDirectDebit(&$form) {
+    $api = new civicrm_api3( array( ' conf_path' => '/var/www/civicrm/' ) );
+
+    // get parameters from form
+    $contribId = $form->_params['contributionID'];
+    $memberId = $form->_params['membershipID'];
+    $contactId = $form->_params['contactID'];
+    $recDate = substr($form->_params['receive_date'], 0, 8); //format: YYYYMMDDTTTTTT (e.g. 20140317093001)
+    $zahlungsweise = ($form->_params['custom_38'] == "Lastschrifteinzug" ? "2" : "4");
+
+    $zahlungsinterval = ($form->_params['custom_36']);
+    $amount = $form->_params['amount'];
+    if ($zahlungsinterval == "monatlich") {
+        $amount = $amount/12.0;
+    } else if ($zahlungsinterval == "vierteljährlich") {
+        $amount = $amount/4.0;
+    }        
+
+    // format of Mandatsreferenz see https://studieren-ohne-grenzen.org/atrium/it/node/5425
+    // <Datum>K<Civi-Kontakt-ID>(M/P)<Membership-ID>
+    $mandatsRef = $recDate . "K" . $contactId . "M" . $memberId;
+
+    sogintegration_saveDirectDebit_updateMembership($api, $memberId, $amount, $mandatsRef);
+    sogintegration_saveDirectDebit_updateContribution($api, $contribId, $zahlungsweise, $recDate, $amount);
+}
+
+
+/**
+ * update the created membership:
+ * - set amount for Mitgliedsbeitrag
+ * -  set automatically generated Mandatsreferenz
+ * ?? update the membership description ??
+ */
+function sogintegration_saveDirectDebit_updateMembership($api, $memberId, $amount, $mandatsRef) {
+    $customField_amount = "custom_37";	
+    $customField_mandatsref = "custom_43";
+    
+    $params = array('version' => 3, 'id' => $memberId, $customField_amount => $amount, $customField_mandatsref => $mandatsRef);
+    $result = $api->Membership->Create ( $params );
+}
+
+
+/**
+ * update the created contribution of the Mitgliedsbeitrag:
+ * - set 'Paid by' (Zahlungsweise = Payment Instrument)
+ * - set 'Source' -> "Mitgliedsbeitrag 20XX"
+ */
+function sogintegration_saveDirectDebit_updateContribution($api, $contribId, $zahlungsweise, $recDate, $amount) {
+    $source = "Mitgliedsbeitrag " . substr($recDate, 0, 4);
+    
+    $params = array('version' => 3, 'sequential' => 1, 'id' => $contribId, 'contribution_payment_instrument_id' => $zahlungsweise, 'contribution_source' => $source, 'contribution_status_id' => 2, 'total_amount' => $amount);
+    $result = $api->Contribution->Create ( $params ); 
+    
+    //TODO: generate all monthly payments?!?
+}
+
+/* Example of $form->_params array:
+Array ( [qfKey] => 442870d528eb09f040273fa27480e74e_8647 [entryURL] => http://localhost/civi6/civicrm/contribute/transact?reset=1&id=1 [first_name] => Test [last_name] => Mustermann [gender_id] => [street_address-1] => sfdfsad [city-1] => afsfdsa [postal_code-1] => 21321 [state_province-Primary] => 2243 [country-1] => 1082 [14] => [group] => Array ( [14] => ) [custom_38] => Lastschrifteinzug [custom_36] => jährlich [custom_42] => Max Mustermann [custom_63] => 29993939 [custom_64] => 298298ddls [custom_40] => GLS [custom_11] => welt [job_title] => [birth_date] => [email-5] => atrium@studieren-ohne-grenzen.org [priceSetId] => 4 [price_22] => 43 [price_23] => 3 [selectProduct] => [MAX_FILE_SIZE] => 52428800 [ip_address] => 127.0.0.1 [amount] => 15 [currencyID] => EUR [payment_action] => Sale [is_pay_later] => 1 [invoiceID] => af2bb7f85c1776abbc81606972c1d771 [description] => Online Contribution: Aktive Mitgliedschaft [accountingCode] => [contributionType_name] => Mitgliedsbeitrag [contributionType_accounting_code] => [contributionPageID] => 1 [contactID] => 2003 [contributionID] => 3760 [contributionTypeID] => 2 [item_name] => Online Contribution: Aktive Mitgliedschaft [receive_date] => 20140317093001 [membershipID] => 1290 ) 
+*/

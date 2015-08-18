@@ -6,8 +6,9 @@
 * Custom hooks for SOG member signup/creation
 */
 
-require_once '/var/www/studieren-ohne-grenzen.org/civicrm/sites/all/modules/civicrm/api/class.api.php' ;
 define("DASHBOARD_DIR", "/var/www/studieren-ohne-grenzen.org/dashboard");
+define("CIVICRM_DIR", dirname(__FILE__)."../../../..");
+require_once CIVICRM_DIR.'/all/modules/civicrm/api/class.api.php' ;
 
 
 /**
@@ -36,6 +37,7 @@ function sogintegration_createSogUser(&$form) {
         $firstName = t($form->_submitValues['first_name']);
         $lastName = t($form->_submitValues['last_name']);
         $email = t($form->_params['email-5']);
+        $contactId = t($form->_params['contactID']);
         $lokalgruppe = t($form->_params['custom_11']);
 
         $lokalgruppe = "lg_" . strtolower($lokalgruppe);
@@ -43,7 +45,26 @@ function sogintegration_createSogUser(&$form) {
         $api = new SOG\Api\SogDashboardApi($dashboard_config);
         $username = $api->createUser($firstName, $lastName, $email, $lokalgruppe);
         
+        $userSogMail = $username . "@studieren-ohne-grenzen.org";
+        sogintegration_addSogMail2Civicrm($contactId, $userSogMail);
+        
         drupal_set_message("Account '".$username."' erstellt");
+}
+
+
+/**
+ * Add its new SOG e-mail id to the CiviCRM contact.
+ * This is essential to match the user account to its CiviCRM contact when the user is logging in.
+ */
+function sogintegration_addSogMail2Civicrm($contactId, $mail) {
+    $params = array(
+      'contact_id' => $contactId,
+      'location_type_id' => 'Main',
+      'email' => $mail
+    );
+
+    $api = new civicrm_api3( array( ' conf_path' => CIVICRM_DIR ) );
+    $api->Email->Create($params);
 }
 
 
@@ -52,7 +73,7 @@ function sogintegration_createSogUser(&$form) {
  * because this is membership specific and not general for the contact overall. 
  */
 function sogintegration_saveDirectDebit(&$form) {
-    $api = new civicrm_api3( array( ' conf_path' => '/var/www/civicrm/' ) );
+    $api = new civicrm_api3( array( ' conf_path' => CIVICRM_DIR ) );
 
     // get parameters from form
     $contribId = $form->_params['contributionID'];

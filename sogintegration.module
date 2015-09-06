@@ -130,4 +130,62 @@ function sogintegration_saveDirectDebit_updateContribution($api, $contribId, $za
 
 /* Example of $form->_params array:
 Array ( [qfKey] => 442870d528eb09f040273fa27480e74e_8647 [entryURL] => http://localhost/civi6/civicrm/contribute/transact?reset=1&id=1 [first_name] => Test [last_name] => Mustermann [gender_id] => [street_address-1] => sfdfsad [city-1] => afsfdsa [postal_code-1] => 21321 [state_province-Primary] => 2243 [country-1] => 1082 [14] => [group] => Array ( [14] => ) [custom_38] => Lastschrifteinzug [custom_36] => jährlich [custom_42] => Max Mustermann [custom_63] => 29993939 [custom_64] => 298298ddls [custom_40] => GLS [custom_11] => welt [job_title] => [birth_date] => [email-5] => atrium@studieren-ohne-grenzen.org [priceSetId] => 4 [price_22] => 43 [price_23] => 3 [selectProduct] => [MAX_FILE_SIZE] => 52428800 [ip_address] => 127.0.0.1 [amount] => 15 [currencyID] => EUR [payment_action] => Sale [is_pay_later] => 1 [invoiceID] => af2bb7f85c1776abbc81606972c1d771 [description] => Online Contribution: Aktive Mitgliedschaft [accountingCode] => [contributionType_name] => Mitgliedsbeitrag [contributionType_accounting_code] => [contributionPageID] => 1 [contactID] => 2003 [contributionID] => 3760 [contributionTypeID] => 2 [item_name] => Online Contribution: Aktive Mitgliedschaft [receive_date] => 20140317093001 [membershipID] => 1290 ) 
-*/
+ */
+
+
+
+/**
+ * Write update of e-mail field in CiviCRM Profile to LDAP
+ */
+function sogintegration_civicrm_post($op, $objectName, $objectId, &$objectRef) {
+  if ($op == 'edit' && $objectName == 'Individual') {
+    $uid = "";
+    $mail = "";
+    $backoff_mail ="";
+
+    foreach($objectRef->email as $m) {
+      if($m->is_primary) {
+        $mail = $m->email;
+      }
+
+      //save mail that is not SOG domain as backoff (because alternative mail can't be SOG)
+      if($backoff_mail === "" && !sogintegration_isSogMail($m->email)) {
+        $backoff_mail = $m->email;
+      }
+
+      // get uid from SOG mail
+      if(sogintegration_isSogMail($m->email)) {
+        $s = split('@', $m->email);
+        $uid = $s[0];
+      }
+    }
+
+    if(sogintegration_isSogMail($mail)) {
+      // don't use a SOG mail as alternative mail
+      $mail = $backoff_mail;
+    }
+
+
+    if($uid === "" || $mail === "") {
+      // no SOG user or no suitable mail at all
+      return;
+    }
+
+    
+
+    require_once DASHBOARD_DIR . '/vendor/autoload.php';
+    require_once(DASHBOARD_DIR . '/app/config.php');
+    $api = new SOG\Api\SogDashboardApi($dashboard_config);
+
+    $api->updateAlternativeMail($uid, $mail);  
+        
+    drupal_set_message("Alternative E-Mail-Adresse für SOG-Systeme aktualisiert: Vergessenes Passwort wird ggf. an $mail gesendet.");
+  }
+}
+
+
+function sogintegration_isSogMail($mail) {
+  $SOG_DOMAIN = "@studieren-ohne-grenzen.org";
+  $length = strlen($SOG_DOMAIN);
+  return (substr($mail, -$length) === $SOG_DOMAIN);
+}

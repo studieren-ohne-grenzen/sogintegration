@@ -15,15 +15,36 @@ require_once CIVICRM_DIR.'/all/modules/civicrm/api/class.api.php' ;
  * Hook into CiviCRM Contribution page (Online Mitgliederformular)
  */
 function sogintegration_civicrm_postProcess($formName, &$form ) {
-    if ($formName == "CRM_Contribute_Form_Contribution_Confirm") { 
-        if($form->_values['title'] == "Aktive Mitgliedschaft") {
-            sogintegration_createSogUser($form);
-        }
-        if ($form->_params['contributionPageID'] == "1" || $form->_params['contributionPageID'] == "2") {
-            sogintegration_saveDirectDebit($form);
-        }
+    if ($formName != "CRM_Contribute_Form_Contribution_Confirm" || !sogintegration_isMembershipSignup($form))
+        return;
+
+    sogintegration_saveDirectDebit($form);
+    
+    if(sogintegration_isNewAktiveMitgliedschaft($form)) {
+        sogintegration_createSogUser($form);
     }
 }
+
+
+function sogintegration_isMembershipSignup($form) {
+    return ($form->_params['contributionPageID'] == "1" || $form->_params['contributionPageID'] == "2");
+}
+
+function sogintegration_isNewAktiveMitgliedschaft($form) {
+    return ($form->_values['title'] == "Aktive Mitgliedschaft");
+}
+
+
+
+/** 
+  * Add the direct debit (Lastschrifteinzug) data like amount and period to the CiviCRM membership
+  * because this is membership specific and not general for the contact overall. 
+  */
+function sogintegration_saveDirectDebit(&$form) {
+  $directDebitSaver = new sogintegration_DirectDebitSaver($form);
+  $directDebitSaver->saveInformationToCiviCRM();
+}
+
 
 
 /**
@@ -68,69 +89,107 @@ function sogintegration_addSogMail2Civicrm($contactId, $mail) {
 }
 
 
-/** 
- * Add the direct debit (Lastschrifteinzug) data like amount and period to the CiviCRM membership
- * because this is membership specific and not general for the contact overall. 
- */
-function sogintegration_saveDirectDebit(&$form) {
-    $api = new civicrm_api3( array( ' conf_path' => CIVICRM_DIR ) );
+
+
+class sogintegration_DirectDebitSaver
+{
+  const CUSTOM_FIELD_AMOUNT = "custom_37";	
+  const CUSTOM_FIELD_MANDATSREF = "custom_43";
+
+
+  public function saveInformationToCiviCRM() {
+    $this->updateMembership();
+    $this->updateContribution();
+  }
+
+  /**
+   * update the created membership:
+   * - set amount for Mitgliedsbeitrag
+   * -  set automatically generated Mandatsreferenz
+   * ?? update the membership description ??
+   */
+  function updateMembership() {
+    $params = array('version' => 3, 
+                    'id' => $this->membershipId,
+                    self::CUSTOM_FIELD_AMOUNT => $this->betrag,
+                    self::CUSTOM_FIELD_MANDATSREF => $this->generateMandatsreferenz()
+                  );
+    $result = $this->api->Membership->Create ( $params );
+  }
+
+
+  /**
+   * update the created contribution of the Mitgliedsbeitrag:
+   * - set 'Paid by' (Zahlungsweise = Payment Instrument)
+   * - set 'Source' -> "Mitgliedsbeitrag 20XX"
+   */
+  function updateContribution() {
+    $source = "Mitgliedsbeitrag " . substr($this->receiveDate, 0, 4);
+    
+    $params = array('version' => 3, 'sequential' => 1, 
+                    'id' => $this->contributionId,
+                    'contribution_payment_instrument_id' => $this->zahlungsweise,
+                    'contribution_source' => $source,
+                    'contribution_status_id' => 2,
+                    'total_amount' => $this->betrag);
+    $result = $this->api->Contribution->Create ( $params ); 
+    
+    //TODO: generate all monthly payments?!?
+  }
+
+
+  public function __construct($form) {
+    $this->api = new civicrm_api3( array( 'conf_path' => CIVICRM_DIR ) );
 
     // get parameters from form
-    $contribId = $form->_params['contributionID'];
-    $memberId = $form->_params['membershipID'];
-    $contactId = $form->_params['contactID'];
-    $recDate = substr($form->_params['receive_date'], 0, 8); //format: YYYYMMDDTTTTTT (e.g. 20140317093001)
-    $zahlungsweise = ($form->_params['custom_38'] == "Lastschrifteinzug" ? "2" : "4");
+    $this->contributionId = $form->_params['contributionID'];
+    $this->membershipId = $form->_params['membershipID'];
+    $this->contactId = $form->_params['contactID'];
+    $this->receiveDate = $this->getReceiveDate($form);
+    $this->zahlungsweise = $this->getZahlungsweise($form);
+    $this->zahlungsinterval = $this->getZahlungsinterval($form);
+    $this->betrag = $this->getBetrag($form);
+  }
 
-    $zahlungsinterval = ($form->_params['custom_36']);
+
+  private function getReceiveDate($form) {
+    return substr($form->_params['receive_date'], 0, 8); //format: YYYYMMDDTTTTTT (e.g. 20140317093001)
+  }
+
+  private function getZahlungsweise($form) {
+    //TODO: use API to determine the correct payment type id?!
+    return $form->_params['custom_38'] == "Lastschrifteinzug" ? "2" : "4";
+  }
+
+  private function getZahlungsinterval($form) {
+    return $form->_params['custom_36'];
+  }
+
+  private function getBetrag($form) {
     $amount = $form->_params['amount'];
+
+    $zahlungsinterval = $this->getZahlungsinterval($form);
     if ($zahlungsinterval == "monatlich") {
         $amount = $amount/12.0;
     } else if ($zahlungsinterval == "vierteljährlich") {
         $amount = $amount/4.0;
-    }        
+    }
 
+    return $amount;
+  }
+
+  private function generateMandatsreferenz() {
     // format of Mandatsreferenz see https://studieren-ohne-grenzen.org/atrium/it/node/5425
     // <Datum>K<Civi-Kontakt-ID>(M/P)<Membership-ID>
-    $mandatsRef = $recDate . "K" . $contactId . "M" . $memberId;
+    return $this->receiveDate . "K" . $this->contactId . "M" . $this->membershipId;
+  }
 
-    sogintegration_saveDirectDebit_updateMembership($api, $memberId, $amount, $mandatsRef);
-    sogintegration_saveDirectDebit_updateContribution($api, $contribId, $zahlungsweise, $recDate, $amount);
+
+  /* Example of $form->_params array:
+    Array ( [qfKey] => 442870d528eb09f040273fa27480e74e_8647 [entryURL] => http://localhost/civi6/civicrm/contribute/transact?reset=1&id=1 [first_name] => Test [last_name] => Mustermann [gender_id] => [street_address-1] => sfdfsad [city-1] => afsfdsa [postal_code-1] => 21321 [state_province-Primary] => 2243 [country-1] => 1082 [14] => [group] => Array ( [14] => ) [custom_38] => Lastschrifteinzug [custom_36] => jährlich [custom_42] => Max Mustermann [custom_63] => 29993939 [custom_64] => 298298ddls [custom_40] => GLS [custom_11] => welt [job_title] => [birth_date] => [email-5] => atrium@studieren-ohne-grenzen.org [priceSetId] => 4 [price_22] => 43 [price_23] => 3 [selectProduct] => [MAX_FILE_SIZE] => 52428800 [ip_address] => 127.0.0.1 [amount] => 15 [currencyID] => EUR [payment_action] => Sale [is_pay_later] => 1 [invoiceID] => af2bb7f85c1776abbc81606972c1d771 [description] => Online Contribution: Aktive Mitgliedschaft [accountingCode] => [contributionType_name] => Mitgliedsbeitrag [contributionType_accounting_code] => [contributionPageID] => 1 [contactID] => 2003 [contributionID] => 3760 [contributionTypeID] => 2 [item_name] => Online Contribution: Aktive Mitgliedschaft [receive_date] => 20140317093001 [membershipID] => 1290 ) 
+   */
 }
 
-
-/**
- * update the created membership:
- * - set amount for Mitgliedsbeitrag
- * -  set automatically generated Mandatsreferenz
- * ?? update the membership description ??
- */
-function sogintegration_saveDirectDebit_updateMembership($api, $memberId, $amount, $mandatsRef) {
-    $customField_amount = "custom_37";	
-    $customField_mandatsref = "custom_43";
-    
-    $params = array('version' => 3, 'id' => $memberId, $customField_amount => $amount, $customField_mandatsref => $mandatsRef);
-    $result = $api->Membership->Create ( $params );
-}
-
-
-/**
- * update the created contribution of the Mitgliedsbeitrag:
- * - set 'Paid by' (Zahlungsweise = Payment Instrument)
- * - set 'Source' -> "Mitgliedsbeitrag 20XX"
- */
-function sogintegration_saveDirectDebit_updateContribution($api, $contribId, $zahlungsweise, $recDate, $amount) {
-    $source = "Mitgliedsbeitrag " . substr($recDate, 0, 4);
-    
-    $params = array('version' => 3, 'sequential' => 1, 'id' => $contribId, 'contribution_payment_instrument_id' => $zahlungsweise, 'contribution_source' => $source, 'contribution_status_id' => 2, 'total_amount' => $amount);
-    $result = $api->Contribution->Create ( $params ); 
-    
-    //TODO: generate all monthly payments?!?
-}
-
-/* Example of $form->_params array:
-Array ( [qfKey] => 442870d528eb09f040273fa27480e74e_8647 [entryURL] => http://localhost/civi6/civicrm/contribute/transact?reset=1&id=1 [first_name] => Test [last_name] => Mustermann [gender_id] => [street_address-1] => sfdfsad [city-1] => afsfdsa [postal_code-1] => 21321 [state_province-Primary] => 2243 [country-1] => 1082 [14] => [group] => Array ( [14] => ) [custom_38] => Lastschrifteinzug [custom_36] => jährlich [custom_42] => Max Mustermann [custom_63] => 29993939 [custom_64] => 298298ddls [custom_40] => GLS [custom_11] => welt [job_title] => [birth_date] => [email-5] => atrium@studieren-ohne-grenzen.org [priceSetId] => 4 [price_22] => 43 [price_23] => 3 [selectProduct] => [MAX_FILE_SIZE] => 52428800 [ip_address] => 127.0.0.1 [amount] => 15 [currencyID] => EUR [payment_action] => Sale [is_pay_later] => 1 [invoiceID] => af2bb7f85c1776abbc81606972c1d771 [description] => Online Contribution: Aktive Mitgliedschaft [accountingCode] => [contributionType_name] => Mitgliedsbeitrag [contributionType_accounting_code] => [contributionPageID] => 1 [contactID] => 2003 [contributionID] => 3760 [contributionTypeID] => 2 [item_name] => Online Contribution: Aktive Mitgliedschaft [receive_date] => 20140317093001 [membershipID] => 1290 ) 
- */
 
 
 

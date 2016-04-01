@@ -104,7 +104,7 @@ class sogintegration_DirectDebitSaver
     $this->api = new civicrm_api3( array( 'conf_path' => CIVICRM_DIR ) );
 
     // get parameters from form
-    $this->contributionId = t($form->_params['contributionID']);
+    $this->contributionId = t($form->_values['contribution_id']);
     $this->membershipId = t($form->_params['membershipID']);
     $this->contactId = t($form->_params['contactID']);
     $this->receiveDate = $this->getReceiveDate($form);
@@ -143,14 +143,17 @@ class sogintegration_DirectDebitSaver
    * - set 'Source' -> "Mitgliedsbeitrag 20XX"
    */
   function updateContribution() {
-    $contribution_source_text = "Mitgliedsbeitrag " . substr($this->receiveDate, 0, 4);
+    //TODO: better delete this contribution completely? (we are importing the real contribution later on anyway)
+    
+    $contribution_source_text = "[Formular] Mitgliedsbeitrag " . substr($this->receiveDate, 0, 4);
     
     $api_call_params = array('version' => 3, 'sequential' => 1, 
                     'id' => $this->contributionId,
                     'contribution_payment_instrument_id' => $this->zahlungsweise,
                     'contribution_source' => $contribution_source_text,
-                    'contribution_status_id' => 2,
-                    'total_amount' => $this->betrag);
+                    'contribution_status_id' => 2
+                    //'total_amount' => $this->betrag //amount like 3,33€ screws up
+                    );
     $result = $this->api->Contribution->Create ( $api_call_params ); 
     
     //TODO: generate all monthly payments?!?

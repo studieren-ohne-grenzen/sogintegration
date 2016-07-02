@@ -18,7 +18,7 @@ function sogintegration_civicrm_postProcess($formName, &$form ) {
   if ($formName != "CRM_Contribute_Form_Contribution_Confirm" || !sogintegration_isMembershipSignup($form))
         return;
 
-    sogintegration_saveDirectDebit($form, sogintegration_isPatenschaft($form));
+    sogintegration_saveDirectDebit($form);
     
     if(sogintegration_isNewAktiveMitgliedschaft($form)) {
         sogintegration_createSogUser($form);
@@ -44,7 +44,7 @@ function sogintegration_isPatenschaft($form) {
   * because this is membership specific and not general for the contact overall. 
   */
 function sogintegration_saveDirectDebit(&$form) {
-  $directDebitSaver = new sogintegration_DirectDebitSaver($form);
+  $directDebitSaver = new sogintegration_DirectDebitSaver($form, sogintegration_isPatenschaft($form));
   $directDebitSaver->saveInformationToCiviCRM();
 }
 

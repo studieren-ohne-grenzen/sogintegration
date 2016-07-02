@@ -18,7 +18,7 @@ function sogintegration_civicrm_postProcess($formName, &$form ) {
   if ($formName != "CRM_Contribute_Form_Contribution_Confirm" || !sogintegration_isMembershipSignup($form))
         return;
 
-    sogintegration_saveDirectDebit($form);
+    sogintegration_saveDirectDebit($form, sogintegration_isPatenschaft($form));
     
     if(sogintegration_isNewAktiveMitgliedschaft($form)) {
         sogintegration_createSogUser($form);
@@ -34,6 +34,9 @@ function sogintegration_isNewAktiveMitgliedschaft($form) {
     return ($form->_values['title'] == "Aktive Mitgliedschaft");
 }
 
+function sogintegration_isPatenschaft($form) {
+    return (strpos($form->_values['title'], 'Pate') !== false);
+}
 
 
 /** 
@@ -100,8 +103,10 @@ class sogintegration_DirectDebitSaver
   const CUSTOM_FIELD_ZAHLUNGSWEISE = 'custom_38';
 
 
-  public function __construct(&$form) {
+  public function __construct(&$form, $isPatenschaft) {
     $this->api = new civicrm_api3( array( 'conf_path' => CIVICRM_DIR ) );
+
+    $this->isPatenschaft = $isPatenschaft;
 
     // get parameters from form
     $this->contributionId = t($form->_values['contribution_id']);
@@ -151,8 +156,8 @@ class sogintegration_DirectDebitSaver
                     'id' => $this->contributionId,
                     'contribution_payment_instrument_id' => $this->zahlungsweise,
                     'contribution_source' => $contribution_source_text,
-                    'contribution_status_id' => 2
-                    //'total_amount' => $this->betrag //amount like 3,33€ screws up
+                    'contribution_status_id' => 2,
+                    'total_amount' => $this->betrag //amount like 3,33€ screws up
                     );
     $result = $this->api->Contribution->Create ( $api_call_params ); 
     
@@ -177,12 +182,22 @@ class sogintegration_DirectDebitSaver
     $amount = $form->_params['amount'];
 
     $zahlungsinterval = $this->getZahlungsinterval($form);
-    if ($zahlungsinterval == "monatlich") {
-        $amount = $amount/12.0;
-    } else if ($zahlungsinterval == "vierteljährlich") {
-        $amount = $amount/4.0;
+
+    if($this->isPatenschaft) {
+        //Patenschaft: amount in form is monthly amount
+        if($zahlungsinterval == "j_hrlich") {
+            $amount = $amount*12;
+        }
+    } else {
+        //Mitgliedschaft: amount in form is annual amount
+        if ($zahlungsinterval == "monatlich") {
+            $amount = $amount/12.0;
+        } else if ($zahlungsinterval == "vierteljährlich") {
+            $amount = $amount/4.0;
+        }
     }
 
+    $amount = round($amount, 2);
     return $amount;
   }
 

@@ -185,7 +185,7 @@ class sogintegration_DirectDebitSaver
 
     if($this->isPatenschaft) {
         //Patenschaft: amount in form is monthly amount
-        if($zahlungsinterval == "j_hrlich") {
+        if($zahlungsinterval == "jährlich") {
             $amount = $amount*12;
         }
     } else {

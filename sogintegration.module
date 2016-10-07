@@ -56,10 +56,23 @@ function sogintegration_saveDirectDebit(&$form) {
 function sogintegration_createSogUser(&$form) {
         require_once DASHBOARD_DIR . '/vendor/autoload.php';
         require_once(DASHBOARD_DIR . '/app/config.php');
+        
+        // Umlaute durch Laute ersetzen
+        $replace = array(
+                'Ä' => 'Ae',
+                'Ö' => 'Oe',
+                'Ü' => 'Ue',
+                'ä' => 'ae',
+                'ö' => 'oe',
+                'ü' => 'ue',
+                'ß' => 'ss',
+        );
 
         // get parameters from form
         $firstName = t($form->_submitValues['first_name']);
+        $firstName = strtr($firstName,$replace);
         $lastName = t($form->_submitValues['last_name']);
+        $lastName = strtr($lastName,$replace);
         $email = t($form->_params['email-5']);
         $contactId = t($form->_params['contactID']);
         $lokalgruppe = t($form->_params['custom_11']);

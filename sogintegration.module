@@ -6,8 +6,8 @@
 * Custom hooks for SOG member signup/creation
 */
 
-define("DASHBOARD_DIR", "/var/www/studieren-ohne-grenzen.org/dashboard");
-define("CIVICRM_DIR", dirname(__FILE__)."../../../..");
+define("DASHBOARD_DIR", "/var/www/services/dashboard");
+define("CIVICRM_DIR", dirname(__FILE__)."/../../../..");
 require_once CIVICRM_DIR.'/all/modules/civicrm/api/class.api.php' ;
 
 

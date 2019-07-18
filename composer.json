@@ -1,4 +1,7 @@
 {
   "type": "drupal-module",
-  "name": "studieren-ohne-grenzen/sogintegration"
+  "name": "studieren-ohne-grenzen/sogintegration",
+  "require": {
+    "globalcitizen/php-iban": "^2.7"
+  }
 }

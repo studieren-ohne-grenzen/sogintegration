@@ -39,6 +39,34 @@ function sogintegration_isPatenschaft($form) {
 }
 
 
+function sogintegration_civicrm_validateForm($formName, &$fields, &$files, &$form, &$errors) {
+  if ($formName != 'CRM_Contribute_Form_Contribution_Main') return;
+  $data = &$form->controller->container();
+  // Check IBAN
+  if (isset($fields['custom_63'])) {
+    $iban = $fields['custom_63'];
+    // Validate IBAN
+    if(!verify_iban($iban)) {
+      $errors['custom_63'] = 'Inkorrekte IBAN';
+    }else{
+      // sanitize IBAN
+      $data['values']['Main']['custom_63'] = iban_to_machine_format($iban);
+    }
+  }
+  // Check BIC
+  if (isset($fields['custom_64'])) {
+    $bic = $fields['custom_64'];
+    if (strlen($bic) !== 11 && strlen($bic) !== 8) {
+      $errors['custom_64'] = 'Inkorrektes Format';
+    }
+    else if (strlen($bic) === 8) {
+      // sanitize BIC
+      $data['values']['Main']['custom_64'] = strtoupper($bic).'XXX';
+    }
+  }
+}
+
+
 /** 
   * Add the direct debit (Lastschrifteinzug) data like amount and period to the CiviCRM membership
   * because this is membership specific and not general for the contact overall. 

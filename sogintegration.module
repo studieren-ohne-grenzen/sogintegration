@@ -294,13 +294,13 @@ function sogintegration_civicrm_post($op, $objectName, $objectId, &$objectRef) {
       return;
     }
 
-    
+    // TODO Sync AltMail change in Civi to LDAP
 
-    require_once DASHBOARD_DIR . '/vendor/autoload.php';
-    require_once(DASHBOARD_DIR . '/app/config.php');
-    $api = new SOG\Api\SogDashboardApi($dashboard_config);
+    // require_once DASHBOARD_DIR . '/vendor/autoload.php';
+    // require_once(DASHBOARD_DIR . '/app/config.php');
+    // $api = new SOG\Api\SogDashboardApi($dashboard_config);
 
-    $api->updateAlternativeMail($uid, $mail);  
+    // $api->updateAlternativeMail($uid, $mail);  
         
     drupal_set_message("Alternative E-Mail-Adresse für SOG-Systeme aktualisiert: Vergessenes Passwort wird ggf. an $mail gesendet.");
   }

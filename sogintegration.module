@@ -113,7 +113,8 @@ function sogintegration_createSogUser(&$form) {
 
         $json = array('firstName' => $firstName, 'lastName' => $lastName,
           'email' => $email, 'lokalgruppe' => $lokalgruppe);
-        $response = $client->request('POST', 'create_user', [
+        $url = $VOGELNEST_BASE_URL + '/create_user';
+        $response = $client->request('POST', $url, [
             'json' => $json,
             'auth' => ['civicrm', $VOGELNEST_SECRET]
         ]);

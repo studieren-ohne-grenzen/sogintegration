@@ -1,12 +1,15 @@
 <?php 
 // $Id: sogintegration.module
 
+// Config for interaction with the Vogelnest
+$VOGELNEST_SECRET = "truly_secret";
+$VOGELNEST_BASE_URL = 'https://URLGOESHERE';
+
 /**
 * @file
 * Custom hooks for SOG member signup/creation
 */
 
-define("DASHBOARD_DIR", "/var/www/services/dashboard");
 define("CIVICRM_DIR", dirname(__FILE__)."/../../../..");
 require_once CIVICRM_DIR.'/all/modules/civicrm/api/class.api.php' ;
 
@@ -82,8 +85,9 @@ function sogintegration_saveDirectDebit(&$form) {
  * Create a new SOG user account through the SOG Dashboard API
  */
 function sogintegration_createSogUser(&$form) {
-        require_once DASHBOARD_DIR . '/vendor/autoload.php';
-        require_once(DASHBOARD_DIR . '/app/config.php');
+        // This line of code is complete guesswork based on
+        // https://www.drupal.org/docs/8/modules/http-client-manager/introduction
+        $client = \Drupal::httpClient();
         
         // Umlaute durch Laute ersetzen
         $replace = array(
@@ -107,13 +111,22 @@ function sogintegration_createSogUser(&$form) {
 
         $lokalgruppe = "lg_" . strtolower($lokalgruppe);
 
-        $api = new SOG\Api\SogDashboardApi($dashboard_config);
-        $username = $api->createUser($firstName, $lastName, $email, $lokalgruppe);
+        $json = array('firstName' => $firstName, 'lastName' => $lastName,
+          'email' => $email, 'lokalgruppe' => $lokalgruppe);
+        $response = $client->request('POST', 'create_user', [
+            'json' => $json,
+            'auth' => ['civicrm', $VOGELNEST_SECRET]
+        ]);
+        if ($response->isSuccessful()) {
+          $username = $response->getBody();
         
-        $userSogMail = $username . "@studieren-ohne-grenzen.org";
-        sogintegration_addSogMail2Civicrm($contactId, $userSogMail);
-        
-        drupal_set_message("Account '".$username."' erstellt");
+          $userSogMail = $username . "@studieren-ohne-grenzen.org";
+          sogintegration_addSogMail2Civicrm($contactId, $userSogMail);
+          
+          drupal_set_message("Account '".$username."' erstellt");
+        } else {
+          // What now ?
+        }
 }
 
 

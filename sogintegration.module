@@ -126,7 +126,7 @@ function sogintegration_createSogUser(&$form) {
           
           drupal_set_message("Account '".$username."' erstellt");
         } else {
-          throw new Exception('Could not talk with dashboard.');
+          throw new Exception('Could not talk with dashboard. Contact it@studieren-ohne-grenzen.org. New member was NOT created.');
           // What now ?
         }
 }

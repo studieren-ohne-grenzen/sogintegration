@@ -1,9 +1,9 @@
 <?php 
 // $Id: sogintegration.module
 
-// Config for interaction with the Vogelnest
-$VOGELNEST_SECRET = "truly_secret";
-$VOGELNEST_BASE_URL = 'https://URLGOESHERE';
+$config = parse_ini_file("config.ini");
+$VOGELNEST_SECRET = config['VOGELNEST_SECRET'];
+$VOGELNEST_BASE_URL = config['VOGELNEST_BASE_URL'];
 
 /**
 * @file
@@ -126,6 +126,7 @@ function sogintegration_createSogUser(&$form) {
           
           drupal_set_message("Account '".$username."' erstellt");
         } else {
+          throw new Exception('Could not talk with dashboard.');
           // What now ?
         }
 }

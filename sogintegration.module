@@ -87,7 +87,7 @@ function sogintegration_saveDirectDebit(&$form) {
 function sogintegration_createSogUser(&$form) {
         // This line of code is complete guesswork based on
         // https://www.drupal.org/docs/8/modules/http-client-manager/introduction
-        $client = \Drupal::httpClient();
+        $client = new  GuzzleHttp\Client();
         
         // Umlaute durch Laute ersetzen
         $replace = array(

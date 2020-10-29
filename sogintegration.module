@@ -2,8 +2,8 @@
 // $Id: sogintegration.module
 
 $config = parse_ini_file("config.ini");
-$VOGELNEST_SECRET = config['VOGELNEST_SECRET'];
-$VOGELNEST_BASE_URL = config['VOGELNEST_BASE_URL'];
+$VOGELNEST_SECRET = $config['VOGELNEST_SECRET'];
+$VOGELNEST_BASE_URL = $config['VOGELNEST_BASE_URL'];
 
 /**
 * @file
